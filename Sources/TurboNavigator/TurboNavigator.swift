@@ -82,8 +82,10 @@ public class TurboNavigator {
 
     // MARK: Internal
 
-    let session: Session
-    let modalSession: Session
+    // NOTE: Making this public for now to allow calling "evaluateJavaScript" on the web view.
+    //       We should probably expose a better API for this.
+    public let session: Session
+    public let modalSession: Session
 
     // MARK: Private
 
