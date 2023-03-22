@@ -172,7 +172,7 @@ To hook into the "refresh" [turbo-rails native route](https://github.com/hotwire
     "/refresh_historical_location"
   ],
   "properties": {
-    "prsentation": "refresh"
+    "presentation": "refresh"
   }
 }
 ```
@@ -188,6 +188,15 @@ More detailed instructions are coming soon. [PRs are welcome](https://github.com
 The `Demo/` directory includes an iOS app and Ruby on Rails server to demo the package.
 
 It shows off most of the navigation flows outlined above. There is also an example CRUD resource for more real world applications of each.
+
+# Cookbook
+
+- [Custom controller and routing overrides](#custom-controller-and-routing-overrides)
+- [Custom configuration](#custom-configuration)
+  - [Override the user agent](#override-the-user-agent)
+  - [Customize the web view and web view configuration](#customize-the-web-view-and-web-view-configuration)
+  - [Customize behavior for external URLs](#customize-behavior-for-external-ur-ls)
+
 
 ## Custom controller and routing overrides
 
@@ -257,6 +266,139 @@ class MyCustomClass: TurboNavigationDelegate {
     func openExternalURL(_ url: URL, from controller: UIViewController) {
         // Do something custom with the external URL.
         // The controller is provided to present on top of.
+    }
+}
+```
+
+### Adding new properties to path configuration rules
+
+Here is what a typical rule looks like:
+
+```json
+{
+  "patterns": [
+    "/users/sign_in"
+  ],
+  "properties": {
+    "context": "modal"
+  },
+  "comment": "Present the web login screen in a modal"
+}
+```
+
+By default, the `properties` property can take the following two configuration options:
+
+- `context`
+- `presentation`
+
+The permitted values for each are defined here: [Navigation.swift](https://github.com/joemasilotti/TurboNavigator/blob/main/Sources/TurboNavigator/Navigation.swift)
+
+
+```swift
+func controller(_ controller: VisitableViewController, forProposal proposal: VisitProposal) -> UIViewController? {
+  if proposal.context == .modal {
+    // ...
+  }
+
+  if proposal.presentation == .clearAll {
+    // ...
+  }
+}
+```
+
+Let's say we wanted to use specific view controllers for certain routes. We might want to add a new `controller` property.
+
+```json
+{
+  "patterns": [
+    "/users/sign_in"
+  ],
+  "properties": {
+    "context": "modal",
+    "controller": "new_session" // <-- Newly added property
+  },
+  "comment": "Present a native authentication controller when signing in."
+}
+```
+
+Now that we added this new property to the path configuration, we should extend our `VisitProposal` struct to give it type-safe access.
+
+1. Let's start by creating a new `enum` for it.
+
+```swift
+// NavigationExtension.swift
+import TurboNavigator
+
+enum Navigation {
+    enum Controller: String {
+        case `default`
+        case newSession = "new_session"
+        case newUser = "new_user"
+        case loading
+        case signOut
+    }
+}
+```
+
+2. Then let's extend the `VisitProposal`
+
+```swift
+// VisitProposalExtension.swift
+import Turbo
+
+extension VisitProposal {
+    var controller: Navigation.Controller {
+        if let rawValue = properties["controller"] as? String {
+            return Navigation.Controller(rawValue: rawValue) ?? .default
+        }
+        return .default
+    }
+}
+```
+
+3. You can now access the new property. Here is an example:
+
+```swift
+func controller(_ controller: VisitableViewController, forProposal proposal: VisitProposal) -> UIViewController? {
+  if proposal.controller == .newSession {
+    // ...
+  }
+}
+```
+
+Other functionality such as disabling "pull to refresh" or hiding the title can be configured using this approach.
+
+### Customize the modal presentation style
+
+Modals are dismissible by default but for certain routes, such as the login page, you might want to forbid dismissing the modal by setting its display mode to "fullscreen". This can be achieved inside the `controller` function. By checking the URL path on the `proposal` object
+
+```swift
+extension TurboTabBarController: TurboNavigationDelegate {
+    func controller(_ controller: VisitableViewController, forProposal proposal: VisitProposal) -> UIViewController? {
+        // Signed in or registered - reload tabs and app.
+        if proposal.presentation == .clearAll {
+            pathConfiguration.reload()
+        }
+
+        if proposal.controller == .newSession {
+            return NewSessionController(router: self)
+        } else if proposal.controller == .newUser {
+            return NewUserController(router: self)
+        } else if proposal.controller == .signOut {
+            return SignOutAlertPresenter(router: self).controller
+        }
+
+        modalNavigationController.modalPresentationStyle = .automatic
+        return controller
+    }
+
+    func session(_ session: Session, didFailRequestForVisitable visitable: Visitable, error: Error) {
+        if error.isUnauthorized {
+            modalNavigationController.modalPresentationStyle = .fullScreen
+            route(Endpoint.newUserSession)
+        } else {
+            ErrorPresenter.present(error, on: visitable) { session.reload() }
+        }
     }
 }
 ```
